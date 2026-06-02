@@ -44,7 +44,7 @@ def get_sni_info(
     line_11 = digamma(qv_phi_1) - digamma(qv_phi_1 + qv_phi_2)  # [T]
     line_12 = digamma(qv_phi_2) - digamma(qv_phi_1 + qv_phi_2)  # [T]
     line_13 = np.einsum('ld,nd->nl', qeta_phi_1 / (sigma_x ** 2), xs) + \
-        -0.5 * np.einsum('ld,kd->l', qeta_phi_1 / (sigma_x ** 2), qeta_phi_1)[None, ...] # [N, T]
+        -0.5 * np.einsum('ld,ld->l', qeta_phi_1 / (sigma_x ** 2), qeta_phi_1)[None, ...] # [N, T]
     
     S_n_i = line_11[..., None] + \
         np.cumsum(np.concatenate([np.array([0]), line_12[:-1]], axis=0), axis=0)[None, ...] + \
@@ -58,12 +58,21 @@ def get_sni_info(
     S_n_tp1 = line_11_tp1 + np.sum(line_12) + line_13_tp1  # []
     exp_S_n_tailsum = S_n_tp1 / (1 - np.exp(line_12_tp1))  # []
 
-    return S_n_i, exp_S_n_i, exp_S_n_headsum, exp_S_n_tailsum
+    return exp_S_n_i, exp_S_n_headsum, exp_S_n_tailsum
     
 def get_qz(exp_S_n_i, exp_S_n_sum):
     q_zi_head = exp_S_n_i / exp_S_n_sum[..., None]  # [N, T]
     q_zi_tailsum = 1 - np.sum(q_zi_head, axis=-1)  # [N]
     return q_zi_head, q_zi_tailsum
+
+def update_qv(
+    q_zi_head, # [N, T]
+    q_zi_tailsum, # [N]
+    pv_alpha_1, # []
+    pv_alpha_2, #[]
+):
+    qv_phi_1_new = pv_alpha_1 + np.sum(q_zi_head, axis=0) # [T]
+    qv_phi_2_new = pv_alpha_2 + np.sum(q_zi_tailsum, axis=0)  # []  (O_o)
 
 def main():
     args = parser.parse_args()
