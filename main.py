@@ -16,6 +16,7 @@ args = parser.parse_args()
 BetaDistribution = namedtuple("BetaDistribution", ["alpha", "beta"])
 GaussianDistribution = namedtuple("GaussianDistribution", ["mean", "stddev"])
 InfCategoricalDistribution = namedtuple("InfCategoricalDistribution", ["headprobs", "tailsum"])
+SniInfo = namedtuple("SniInfo", ["terms", "headsum", "tailsum"])
 
 def get_pv():
     return BetaDistribution(alpha=1.0, beta=1.0)
@@ -49,6 +50,7 @@ def get_sni_info(
     qv, # ([T], [T])
     qeta, # ([T, D], [])
     pv, # ([], [])
+    peta, # ([], [])
 ):
     sigma_x = args.cluster_observation_stddev
     line_11 = digamma(qv.alpha) - digamma(qv.alpha + qv.beta)  # [T]
@@ -66,40 +68,42 @@ def get_sni_info(
 
     line_11_tp1 = digamma(pv.alpha) - digamma(pv.alpha + pv.beta)  # []
     line_12_tp1 = digamma(pv.beta) - digamma(pv.alpha + pv.beta)  # []
-    line_13_tp1 = # redo this it isnt zero obv
-    S_n_tp1 = line_11_tp1 + np.sum(line_12) + line_13_tp1  # []
-    exp_S_n_tailsum = S_n_tp1 / (1 - np.exp(line_12_tp1))  # []
+    line_13_tp1 = (
+        np.einsum('d,nd->n', np.full(fill_value=peta.mu, shape=xs.shape[1]), xs)
+        - xs.shape[1] * (peta.mu ** 2 + peta.stddev ** 2) / (sigma_x ** 2) # [N]
+    )
+    S_n_tp1 = line_11_tp1 + np.sum(line_12) + line_13_tp1  # [N]
+    exp_S_n_tailsum = S_n_tp1 / (1 - np.exp(line_12_tp1))  # [N]
+    return SniInfo(terms=exp_S_n_i, headsum=exp_S_n_headsum, tailsum=exp_S_n_tailsum)
 
-    return exp_S_n_i, exp_S_n_headsum, exp_S_n_tailsum
-
-def update_qz(exp_S_n_i, exp_S_n_sum):
+def update_qz(sni_info):
+    exp_S_n_i = sni_info.terms
+    exp_S_n_sum = sni_info.headsum + sni_info.tailsum
     q_zi_head = exp_S_n_i / exp_S_n_sum[..., None]  # [N, T]
     q_zi_tailsum = 1 - np.sum(q_zi_head, axis=-1)
     return InfCategoricalDistribution(headprobs=q_zi_head, tailsum=q_zi_tailsum)
 
 def update_qv(
-    q_zi_head, # [N, T]
-    q_zi_tailsum, # [N]
-    pv_alpha_1, # []
-    pv_alpha_2, #[]
+    qz, # ([N, T], [N])
+    pv, # ([], [])
 ):
     # compute line 14 left
-    qv_phi_1_new = pv_alpha_1 + np.sum(q_zi_head, axis=0) # [T]
+    qv_phi_1_new = pv.alpha + np.sum(qz.headprobs, axis=0) # [T]
     # now compute sum_j={i+1}^infty = sum_j={i+1}^T + sum_j={T+1}^infty
     # i=1 -> sum i=2 ... i=T
     # ...
     # i=T-2 -> sum i=T-1 ... i=T
     # i=T-1 -> sum i=T
     # i=T -> 0
-    N = q_zi_head.shape[0]
-    chop = q_zi_head[:, 1:]
+    N = qz.headprobs.shape[0]
+    chop = qz.headprobs[:, 1:]
     flip = chop[:, ::-1]
     pad = np.pad(flip, ((0, 0), (1, 0)), mode='constant')
     cumulative = np.cumsum(pad, axis=-1)
     unflip = cumulative[:, ::-1]  # [N, T]
-    qz_ip1_tailsum = unflip + q_zi_tailsum[..., None]  # [N, T]
+    qz_ip1_tailsum = unflip + qz.tailsum[..., None]  # [N, T]
     # compute line 14 right
-    qv_phi_2_new = pv_alpha_2 + np.sum(qz_ip1_tailsum, axis=0)  # [T]
+    qv_phi_2_new = pv.beta + np.sum(qz_ip1_tailsum, axis=0)  # [T]
     return BetaDistribution(alpha=qv_phi_1_new, beta=qv_phi_2_new)
 
 def update_qeta(xs, qz, peta):
@@ -140,16 +144,31 @@ def get_total_gaussian_kl_divergence(
     return np.sum(kls, axis=0) # []
 
 def get_elbo(xs, qv, qeta, pv, peta):
-    # compute the elbo assuming 
+    # computes the elbo assuming q(z) was optimized last
     total_kl_beta = get_total_beta_kl_diverence(qv, pv)
     total_kl_gauss = get_total_gaussian_kl_divergence(qeta, peta)
-    _, Sni_headsum, Sni_tailsum = get_sni_info(xs, qv, qeta, pv)
-    Sni_infsum = Sni_headsum + Sni_tailsum
-    free_energy = total_kl_beta + total_kl_gauss + 
-
-
+    sni_info = get_sni_info(xs, qv, qeta, pv)
+    sn_infsum = sni_info.headsum + sni_info.tailsum
+    free_energy = total_kl_beta + total_kl_gauss - np.sum(np.log(sn_infsum), axis=0)
+    elbo = -free_energy
+    return elbo
 
 def main():
     args = parser.parse_args()
-    df = pd.read_csv(args.data_csv)
-    xs = df.to_numpy()
+    # df = pd.read_csv(args.data_csv)
+    # xs = df.to_numpy()
+
+    xs = np.random.normal(loc=0.5, scale=0.1, shape=[100, 1])
+    pv = get_pv()
+    peta = get_peta()
+    qv = get_qv_initial()
+    qeta = get_qeta_initial()
+    
+    qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
+    print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
+
+    for _ in range(0, 10):
+        qv = update_qv(qz, pv)
+        qeta = update_qeta(xs, qz, peta)
+        qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
+        print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
