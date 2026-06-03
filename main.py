@@ -180,9 +180,43 @@ def get_elbo_normalized(xs, qv, qeta, pv, peta):
     
     return elbo
 
+def get_mean_stick_lengths(qv):
+    means = qv.alpha / (qv.alpha + qv.beta)  # [T]
+    # print(f"stick means all positive: {np.all(means > 0)}")
+    # print(f"stick means all < 1: {np.all(means < 1)}")
+    minus = 1 - means  # [T]
+    # print(f"1 minus stick means all positive: {np.all(minus > 0)}")
+    # print(f"1 minus stick means all < 1: {np.all(minus < 1)}")
+
+    minus_prod = np.cumprod(minus, axis=0)  # [T]
+    minus_prod = np.pad(minus_prod[0:-1], ((1, 0)), mode='constant', constant_values=1.0)
+    return means * minus_prod
+
+# def permute_cluster_ids(qv, qeta, qz):
+#     stick_means = get_mean_stick_lengths(qv)
+#     sort_idxs = np.argsort(stick_means)
+#     qv_new = BetaDistribution(
+#         alpha=np.take_along_axis(qv.alpha, sort_idxs, axis=0), 
+#         beta=np.take_along_axis(qv.beta, sort_idxs, axis=0), 
+#     )
+#     qeta_new = GaussianDistribution(
+#         mean=np.take_along_axis(qeta.mean, sort_idxs[..., None], axis=0), 
+#         stddev=qeta.stddev,
+#     )
+#     qz_new = InfCategoricalDistribution(
+#         headprobs=np.take_along_axis(qz.headprobs, sort_idxs[None, ...], axis=1), 
+#         tailsum=qz.tailsum,
+#     )
+#     return qv_new, qeta_new, qz_new
+
+def print_stick_lengths(qv):
+    stick_means = get_mean_stick_lengths(qv)
+    for i in range(qv.alpha.shape[0]):
+        print(stick_means[i])
+
 def main():
-    xs0 = np.random.normal(loc=0.5, scale=0.1, size=[100, 16])
-    xs1 = np.random.normal(loc=-0.5, scale=0.1, size=[100, 16])
+    xs0 = np.random.normal(loc=0.5, scale=0.05, size=[1000, 100])
+    xs1 = np.random.normal(loc=-0.5, scale=0.05, size=[1000, 100])
     xs = np.concatenate([xs0, xs1], axis=0)
 
     pv = get_pv()
@@ -198,6 +232,11 @@ def main():
         qeta = update_qeta(xs, qz)
         qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
         print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
+
+    print_stick_lengths(qv)
+    # qv, qeta, qz = permute_cluster_ids(qv, qeta, qz)
+    # print_stick_lengths(qv)
+    # print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
 
 if __name__ == "__main__":
     main()
