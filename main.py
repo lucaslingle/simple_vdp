@@ -4,6 +4,10 @@ import numpy as np
 import pandas as pd
 from scipy.special import gammaln, digamma
 from collections import namedtuple
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser("Simplified Kurihara VDP for DP-MoG")
 parser.add_argument("--data_csv", type=str)
@@ -65,6 +69,7 @@ def get_sni_info(
     )
     exp_S_n_i = np.exp(S_n_i)  # [N, T]
     exp_S_n_headsum = np.sum(exp_S_n_i, axis=-1)  # [N]
+    logging.info(f"exp_S_n_headsum: {exp_S_n_headsum}")
 
     line_11_tp1 = digamma(pv.alpha) - digamma(pv.alpha + pv.beta)  # []
     line_12_tp1 = digamma(pv.beta) - digamma(pv.alpha + pv.beta)  # []
@@ -73,7 +78,10 @@ def get_sni_info(
         - xs.shape[1] * (peta.mean ** 2 + peta.stddev ** 2) / (sigma_x ** 2) # [N]
     )
     S_n_tp1 = line_11_tp1 + np.sum(line_12) + line_13_tp1  # [N]
-    exp_S_n_tailsum = S_n_tp1 / (1 - np.exp(line_12_tp1))  # [N]
+    logging.info(f"S_n_tp1: {S_n_tp1}")
+    exp_S_n_tailsum = np.exp(S_n_tp1) / (1 - np.exp(line_12_tp1))  # [N]  # derive later. seems typo. theres no way its just S_n_tp1 in numer since it is often negative. 
+    logging.info(f"exp_S_n_tailsum: {exp_S_n_tailsum}")
+
     return SniInfo(terms=exp_S_n_i, headsum=exp_S_n_headsum, tailsum=exp_S_n_tailsum)
 
 def update_qz(sni_info):
@@ -146,11 +154,23 @@ def get_total_gaussian_kl_divergence(
 def get_elbo(xs, qv, qeta, pv, peta):
     # computes the elbo assuming q(z) was optimized last
     total_kl_beta = get_total_beta_kl_diverence(qv, pv)
+    logger.info(f"total_kl_beta: {total_kl_beta}")
+
     total_kl_gauss = get_total_gaussian_kl_divergence(qeta, peta)
-    sni_info = get_sni_info(xs, qv, qeta, pv)
+    logger.info(f"total_kl_gauss: {total_kl_gauss}")
+
+    sni_info = get_sni_info(xs, qv, qeta, pv, peta)
     sn_infsum = sni_info.headsum + sni_info.tailsum
-    free_energy = total_kl_beta + total_kl_gauss - np.sum(np.log(sn_infsum), axis=0)
+    # logger.info(f"sn_infsum: {sn_infsum}")
+    lastterm = -np.sum(np.log(sn_infsum), axis=0)
+    logger.info(f"lastterm: {lastterm}")
+
+    free_energy = total_kl_beta + total_kl_gauss + lastterm
+    logger.info(f"free_energy: {free_energy}")
+
     elbo = -free_energy
+    logger.info(f"elbo: {elbo}")
+
     return elbo
 
 def main():
@@ -158,7 +178,7 @@ def main():
     # df = pd.read_csv(args.data_csv)
     # xs = df.to_numpy()
 
-    xs = np.random.normal(loc=0.5, scale=0.1, shape=[100, 1])
+    xs = np.random.normal(loc=0.5, scale=0.1, shape=[10, 1])
     pv = get_pv()
     peta = get_peta()
     qv = get_qv_initial()
@@ -167,8 +187,11 @@ def main():
     qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
     print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
 
-    for _ in range(0, 10):
+    for _ in range(0, 3):
         qv = update_qv(qz, pv)
         qeta = update_qeta(xs, qz, peta)
         qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
         print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
+
+if __name__ == "__main__":
+    main()
