@@ -24,7 +24,10 @@ def get_qv_params_init():
     phi_v2 = conc - phi_v1
     return phi_v1, phi_v2
 
-def get_qeta_phi1_init(data_dim):
+def get_peta_params():
+    return 0.0, args.cluster_location_prior_stddev
+
+def get_qeta_parms_init(data_dim):
     phi_eta1 = np.random.normal(
         loc=0.0, 
         scale=args.cluster_location_prior_stddev, 
@@ -62,6 +65,7 @@ def get_sni_info(
     
 def update_qz(exp_S_n_i, exp_S_n_sum):
     q_zi_head = exp_S_n_i / exp_S_n_sum[..., None]  # [N, T]
+    q_zi_tailsum = 1 - np.sum(q_zi_tailsum, axis=-1)
     return q_zi_head
 
 def update_qv(
@@ -84,12 +88,16 @@ def update_qv(
     pad = np.pad(flip, ((0, 0), (1, 0)), mode='constant')
     cumulative = np.cumsum(pad, axis=-1)
     unflip = cumulative[:, ::-1]  # [N, T]
-    qz_ip1_tailsum = unflip + q_zi_tailsum  # [N, T]
+    qz_ip1_tailsum = unflip + q_zi_tailsum[..., None]  # [N, T]
 
     qv_phi_2_new = pv_alpha_2 + np.sum(qz_ip1_tailsum, axis=0)  # [T]
     
     return qv_phi_1_new, qv_phi_2_new
 
+def update_qeta(xs, q_zi_head, peta_lambda_1):
+    qeta_phi_1_new = peta_lambda_1 + np.einsum('nt,nd->td', q_zi_head, xs)  # [T, D]
+    qeta_phi_2_new = args.cluster_location_posterior_stddev                 # []
+    return qeta_phi_1_new, qeta_phi_2_new
 
 def main():
     args = parser.parse_args()
