@@ -59,7 +59,7 @@ def get_sni_info(
         -0.5 * np.einsum('ld,ld->l', qeta.mean / (sigma_x ** 2), qeta.mean)[None, ...] # [N, T]
     
     S_n_i = (
-        line_11[..., None] + 
+        line_11[None,...] + 
         np.cumsum(np.concatenate([np.array([0]), line_12[:-1]], axis=0), axis=0)[None, ...] + 
         line_13  # [N, T]
     )
@@ -69,8 +69,8 @@ def get_sni_info(
     line_11_tp1 = digamma(pv.alpha) - digamma(pv.alpha + pv.beta)  # []
     line_12_tp1 = digamma(pv.beta) - digamma(pv.alpha + pv.beta)  # []
     line_13_tp1 = (
-        np.einsum('d,nd->n', np.full(fill_value=peta.mu, shape=xs.shape[1]), xs)
-        - xs.shape[1] * (peta.mu ** 2 + peta.stddev ** 2) / (sigma_x ** 2) # [N]
+        np.einsum('d,nd->n', np.full(fill_value=peta.mean, shape=xs.shape[1]), xs)
+        - xs.shape[1] * (peta.mean ** 2 + peta.stddev ** 2) / (sigma_x ** 2) # [N]
     )
     S_n_tp1 = line_11_tp1 + np.sum(line_12) + line_13_tp1  # [N]
     exp_S_n_tailsum = S_n_tp1 / (1 - np.exp(line_12_tp1))  # [N]
@@ -162,8 +162,8 @@ def main():
     pv = get_pv()
     peta = get_peta()
     qv = get_qv_initial()
-    qeta = get_qeta_initial()
-    
+    qeta = get_qeta_initial(data_dim=xs.shape[1])
+
     qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
     print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
 
