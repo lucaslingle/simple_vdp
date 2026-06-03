@@ -6,7 +6,7 @@ from scipy.special import gammaln, digamma
 from collections import namedtuple
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser("Simplified Kurihara VDP for DP-MoG")
@@ -15,7 +15,8 @@ parser.add_argument("--cluster_observation_stddev", type=float, default=0.05)
 parser.add_argument("--cluster_location_prior_stddev", type=float, default=1.0)
 parser.add_argument("--cluster_location_posterior_stddev", type=float, default=0.05)
 parser.add_argument("--inferred_clusters_limit", type=int, default=10)  # T, everything after is tied to priors
-args = parser.parse_args()
+args = parser.parse_args(["--data_csv", "none.csv"])
+# args = parser.parse_args()
 
 BetaDistribution = namedtuple("BetaDistribution", ["alpha", "beta"])
 GaussianDistribution = namedtuple("GaussianDistribution", ["mean", "stddev"])
