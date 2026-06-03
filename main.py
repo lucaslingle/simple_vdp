@@ -50,7 +50,7 @@ def get_sni_info(
         np.cumsum(np.concatenate([np.array([0]), line_12[:-1]], axis=0), axis=0)[None, ...] + \
         line_13  # [N, T]
     exp_S_n_i = np.exp(S_n_i)  # [N, T]
-    exp_S_n_headsum = np.sum(exp_S_n_i, axis=-1, keepdims=True)  # [N]
+    exp_S_n_headsum = np.sum(exp_S_n_i, axis=-1)  # [N]
 
     line_11_tp1 = digamma(pv_alpha_1) - digamma(pv_alpha_1 + pv_alpha_2)  # []
     line_12_tp1 = digamma(pv_alpha_2) - digamma(pv_alpha_1 + pv_alpha_2)  # []
@@ -60,10 +60,9 @@ def get_sni_info(
 
     return exp_S_n_i, exp_S_n_headsum, exp_S_n_tailsum
     
-def get_qz(exp_S_n_i, exp_S_n_sum):
+def update_qz(exp_S_n_i, exp_S_n_sum):
     q_zi_head = exp_S_n_i / exp_S_n_sum[..., None]  # [N, T]
-    q_zi_tailsum = 1 - np.sum(q_zi_head, axis=-1)  # [N]
-    return q_zi_head, q_zi_tailsum
+    return q_zi_head
 
 def update_qv(
     q_zi_head, # [N, T]
@@ -72,7 +71,25 @@ def update_qv(
     pv_alpha_2, #[]
 ):
     qv_phi_1_new = pv_alpha_1 + np.sum(q_zi_head, axis=0) # [T]
-    qv_phi_2_new = pv_alpha_2 + np.sum(q_zi_tailsum, axis=0)  # []  (O_o)
+
+    # compute sum_j={i+1}^infty = sum_j={i+1}^T + sum_j={T+1}^infty
+    # i=1 -> sum i=2 ... i=T
+    # ...
+    # i=T-2 -> sum i=T-1 ... i=T
+    # i=T-1 -> sum i=T
+    # i=T -> 0
+    N = q_zi_head.shape[0]
+    chop = q_zi_head[:, 1:]
+    flip = chop[:, ::-1]
+    pad = np.pad(flip, ((0, 0), (1, 0)), mode='constant')
+    cumulative = np.cumsum(pad, axis=-1)
+    unflip = cumulative[:, ::-1]  # [N, T]
+    qz_ip1_tailsum = unflip + q_zi_tailsum  # [N, T]
+
+    qv_phi_2_new = pv_alpha_2 + np.sum(qz_ip1_tailsum, axis=0)  # [T]
+    
+    return qv_phi_1_new, qv_phi_2_new
+
 
 def main():
     args = parser.parse_args()
