@@ -20,7 +20,7 @@ args = parser.parse_args()
 BetaDistribution = namedtuple("BetaDistribution", ["alpha", "beta"])
 GaussianDistribution = namedtuple("GaussianDistribution", ["mean", "stddev"])
 InfCategoricalDistribution = namedtuple("InfCategoricalDistribution", ["headprobs", "tailsum"])
-SniInfo = namedtuple("SniInfo", ["terms", "headsum", "tailsum"])
+SniInfo = namedtuple("SniInfo", ["terms", "headsum", "tailsum", "stabilizer"])
 
 def get_pv():
     return BetaDistribution(alpha=1.0, beta=1.0)
@@ -65,11 +65,12 @@ def get_sni_info(
     S_n_i = (
         line_11[None,...] + 
         np.cumsum(np.concatenate([np.array([0]), line_12[:-1]], axis=0), axis=0)[None, ...] + 
-        line_13  # [N, T]
-    )
-    exp_S_n_i = np.exp(S_n_i)  # [N, T]
-    exp_S_n_headsum = np.sum(exp_S_n_i, axis=-1)  # [N]
-    logging.info(f"exp_S_n_headsum: {exp_S_n_headsum}")
+        line_13
+    ) # [N, T]
+    stabilizer = np.max(S_n_i, axis=-1)                # [N]
+    exp_S_n_i = np.exp(S_n_i - stabilizer[..., None])  # [N, T]
+    exp_S_n_headsum = np.sum(exp_S_n_i, axis=-1)       # [N]
+    # logging.info(f"exp_S_n_headsum: {exp_S_n_headsum}")
 
     line_11_tp1 = digamma(pv.alpha) - digamma(pv.alpha + pv.beta)  # []
     line_12_tp1 = digamma(pv.beta) - digamma(pv.alpha + pv.beta)  # []
@@ -78,11 +79,11 @@ def get_sni_info(
         - xs.shape[1] * (peta.mean ** 2 + peta.stddev ** 2) / (sigma_x ** 2) # [N]
     )
     S_n_tp1 = line_11_tp1 + np.sum(line_12) + line_13_tp1  # [N]
-    logging.info(f"S_n_tp1: {S_n_tp1}")
-    exp_S_n_tailsum = np.exp(S_n_tp1) / (1 - np.exp(line_12_tp1))  # [N]  # derive later. seems typo. theres no way its just S_n_tp1 in numer since it is often negative. 
-    logging.info(f"exp_S_n_tailsum: {exp_S_n_tailsum}")
+    # logging.info(f"S_n_tp1: {S_n_tp1}")
+    exp_S_n_tailsum = np.exp(S_n_tp1 - stabilizer) / (1 - np.exp(line_12_tp1))  # [N]
+    # logging.info(f"exp_S_n_tailsum: {exp_S_n_tailsum}")
 
-    return SniInfo(terms=exp_S_n_i, headsum=exp_S_n_headsum, tailsum=exp_S_n_tailsum)
+    return SniInfo(terms=exp_S_n_i, headsum=exp_S_n_headsum, tailsum=exp_S_n_tailsum, stabilizer=stabilizer)
 
 def update_qz(sni_info):
     exp_S_n_i = sni_info.terms
@@ -120,6 +121,15 @@ def update_qeta(xs, qz, peta):
         stddev=args.cluster_location_posterior_stddev,
     )
 
+def update_qeta_magic(xs, qz):
+    sigma_x = args.cluster_observation_stddev
+    numer = np.einsum('nt,nd->td', qz.headprobs, xs)
+    denom = (sigma_x ** 2) + np.sum(qz.headprobs, axis=0)
+    return GaussianDistribution(
+        mean=numer / denom[..., None], 
+        stddev=args.cluster_location_posterior_stddev,
+    )
+
 def get_total_beta_kl_diverence(
     qv, # ([T], [T])
     pv, # ([], [])
@@ -151,47 +161,49 @@ def get_total_gaussian_kl_divergence(
     kls = np.sum(term1 + term2 + term3 + term4, axis=-1)  # [T]
     return np.sum(kls, axis=0) # []
 
-def get_elbo(xs, qv, qeta, pv, peta):
-    # computes the elbo assuming q(z) was optimized last
-    total_kl_beta = get_total_beta_kl_diverence(qv, pv)
-    logger.info(f"total_kl_beta: {total_kl_beta}")
+def get_elbo_normalized(xs, qv, qeta, pv, peta):
+    # computes the elbo/(N*D), and assumes q(z) was optimized last
+    N = xs.shape[0]
+    D = xs.shape[1]
 
-    total_kl_gauss = get_total_gaussian_kl_divergence(qeta, peta)
-    logger.info(f"total_kl_gauss: {total_kl_gauss}")
+    kl_beta = get_total_beta_kl_diverence(qv, pv) / (N * D)
+    logger.info(f"kl_beta: {kl_beta}")
+
+    kl_gauss = get_total_gaussian_kl_divergence(qeta, peta) / (N * D)
+    logger.info(f"kl_gauss: {kl_gauss}")
 
     sni_info = get_sni_info(xs, qv, qeta, pv, peta)
     sn_infsum = sni_info.headsum + sni_info.tailsum
-    # logger.info(f"sn_infsum: {sn_infsum}")
-    lastterm = -np.sum(np.log(sn_infsum), axis=0)
+    lastterm = -np.mean(sni_info.stabilizer + np.log(sn_infsum), axis=0) / (D)
     logger.info(f"lastterm: {lastterm}")
 
-    free_energy = total_kl_beta + total_kl_gauss + lastterm
+    free_energy = kl_beta + kl_gauss + lastterm
     logger.info(f"free_energy: {free_energy}")
 
     elbo = -free_energy
     logger.info(f"elbo: {elbo}")
-
+    
     return elbo
 
 def main():
-    args = parser.parse_args()
-    # df = pd.read_csv(args.data_csv)
-    # xs = df.to_numpy()
+    xs0 = np.random.normal(loc=0.5, scale=0.1, size=[100, 16])
+    xs1 = np.random.normal(loc=-0.5, scale=0.1, size=[100, 16])
+    xs = np.concatenate([xs0, xs1], axis=0)
 
-    xs = np.random.normal(loc=0.5, scale=0.1, shape=[10, 1])
     pv = get_pv()
     peta = get_peta()
     qv = get_qv_initial()
     qeta = get_qeta_initial(data_dim=xs.shape[1])
 
     qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
-    print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
+    print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
 
-    for _ in range(0, 3):
+    for _ in range(0, 5):
         qv = update_qv(qz, pv)
-        qeta = update_qeta(xs, qz, peta)
+        qeta = update_qeta_magic(xs, qz)
+        # qeta = update_qeta(xs, qz, peta)
         qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
-        print(f"ELBO: {get_elbo(xs, qv, qeta, pv, peta)}")
+        print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
 
 if __name__ == "__main__":
     main()
