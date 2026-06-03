@@ -195,8 +195,7 @@ def main():
 
     for _ in range(0, 5):
         qv = update_qv(qz, pv)
-        # qeta = update_qeta_vibes(xs, qz, peta)
-        qeta = update_qeta_math(xs, qz)
+        qeta = update_qeta(xs, qz)
         qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
         print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
 
