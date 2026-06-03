@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import pandas as pd
-from scipy.special import digamma
+from scipy.special import gammaln, digamma
 
 parser = argparse.ArgumentParser("Simplified Kurihara VDP for DP-MoG")
 parser.add_argument("--data_csv", type=str)
@@ -98,6 +98,23 @@ def update_qeta(xs, q_zi_head, peta_lambda_1):
     qeta_phi_1_new = peta_lambda_1 + np.einsum('nt,nd->td', q_zi_head, xs)  # [T, D]
     qeta_phi_2_new = args.cluster_location_posterior_stddev                 # []
     return qeta_phi_1_new, qeta_phi_2_new
+
+def get_total_beta_kl_diverence(
+    qv_phi_1, # [T]
+    qv_phi_2, # [T]
+    pv_alpha_1, # []
+    pv_alpha_2, # []
+):
+    log_beta_q = gammaln(qv_phi_1 + qv_phi_2) - gammaln(qv_phi_1) - gammaln(qv_phi_2)
+    log_beta_p = gammaln(pv_alpha_1 + pv_alpha_2) - gammaln(pv_alpha_1) - gammaln(pv_alpha_2)
+    term_normalization = log_beta_q - log_beta_p
+
+    term_expectation = (
+        (qv_phi_1 - pv_alpha_1) * (digamma(qv_phi_1) - digamma(qv_phi_1 + qv_phi_2)) +
+        (qv_phi_2 - pv_alpha_2) * (digamma(qv_phi_2) - digamma(qv_phi_1 + qv_phi_2))
+    )
+
+    return np.sum(term_normalization + term_expectation, axis=0)
 
 def main():
     args = parser.parse_args()
