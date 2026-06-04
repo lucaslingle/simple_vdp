@@ -5,6 +5,7 @@ import pandas as pd
 from scipy.special import gammaln, digamma
 from collections import namedtuple
 import logging
+import matplotlib.pyplot as plt
 
 logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
@@ -46,9 +47,6 @@ def get_qeta_initial(data_dim):
         size=[args.inferred_clusters_limit, data_dim],
     )
     return GaussianDistribution(mean=mu, stddev=args.cluster_location_posterior_stddev)
-
-def get_px_given_eta(eta):
-    return GaussianDistribution(mean=eta, stddev=args.cluster_observation_stddev)
 
 def get_sni_info(
     xs, # [N, D]
@@ -182,41 +180,102 @@ def get_elbo_normalized(xs, qv, qeta, pv, peta):
 
 def get_mean_stick_lengths(qv):
     means = qv.alpha / (qv.alpha + qv.beta)  # [T]
-    # print(f"stick means all positive: {np.all(means > 0)}")
-    # print(f"stick means all < 1: {np.all(means < 1)}")
     minus = 1 - means  # [T]
-    # print(f"1 minus stick means all positive: {np.all(minus > 0)}")
-    # print(f"1 minus stick means all < 1: {np.all(minus < 1)}")
-
     minus_prod = np.cumprod(minus, axis=0)  # [T]
     minus_prod = np.pad(minus_prod[0:-1], ((1, 0)), mode='constant', constant_values=1.0)
     return means * minus_prod
 
-# def permute_cluster_ids(qv, qeta, qz):
-#     stick_means = get_mean_stick_lengths(qv)
-#     sort_idxs = np.argsort(stick_means)
-#     qv_new = BetaDistribution(
-#         alpha=np.take_along_axis(qv.alpha, sort_idxs, axis=0), 
-#         beta=np.take_along_axis(qv.beta, sort_idxs, axis=0), 
-#     )
-#     qeta_new = GaussianDistribution(
-#         mean=np.take_along_axis(qeta.mean, sort_idxs[..., None], axis=0), 
-#         stddev=qeta.stddev,
-#     )
-#     qz_new = InfCategoricalDistribution(
-#         headprobs=np.take_along_axis(qz.headprobs, sort_idxs[None, ...], axis=1), 
-#         tailsum=qz.tailsum,
-#     )
-#     return qv_new, qeta_new, qz_new
+def permute_cluster_ids(qv, qeta, qz):
+    stick_means = get_mean_stick_lengths(qv)
+    sort_idxs = np.argsort(stick_means)[::-1]
+    qv_new = BetaDistribution(
+        alpha=np.take_along_axis(qv.alpha, sort_idxs, axis=0), 
+        beta=np.take_along_axis(qv.beta, sort_idxs, axis=0), 
+    )
+    qeta_new = GaussianDistribution(
+        mean=np.take_along_axis(qeta.mean, sort_idxs[..., None], axis=0), 
+        stddev=qeta.stddev,
+    )
+    qz_new = InfCategoricalDistribution(
+        headprobs=np.take_along_axis(qz.headprobs, sort_idxs[None, ...], axis=1), 
+        tailsum=qz.tailsum,
+    )
+    return qv_new, qeta_new, qz_new
 
 def print_stick_lengths(qv):
     stick_means = get_mean_stick_lengths(qv)
     for i in range(qv.alpha.shape[0]):
         print(stick_means[i])
 
+def get_posterior_predictive_density(qv, qeta, peta):
+    # E_{q(V)}[pi_i(V)] = E_{q(v_1)q(v_2)...q(v_T)}[v_i prod_{j=1}^{i-1} (1-v_j)]
+    #                   = E_q(v_i)[v_i] prod_{j=1}^{i-1} (1-E_{q(v_j)}[v_j])
+    head_mixture_weights = get_mean_stick_lengths(qv)
+    # there is a typo in last term of equation 7 of the paper.
+    # they use 1 - sum_{i=1^T} E_{p(V)}[pi_i(V)]
+    # but even i know that is incorrect because the weights wouldnt sum to one, not by a longshot.
+    # gotta use q(V) not p(V) there.
+    tail_mixture_weight = 1 - np.sum(head_mixture_weights)
+    # E_{q(eta_i)}[p(x|eta_i)] = int_R^D [p(x|eta_i)q(eta_i)]
+    # both terms are gaussian, bishop page 93 derives the marginal dist
+    head_dist = GaussianDistribution(
+        mean=qeta.mean, 
+        stddev=(args.cluster_observation_stddev ** 2 + qeta.stddev ** 2) ** 0.5,
+    )
+    # get density E_{q(eta_i)}[p(x|eta_i)] as function of x
+    D = head_dist.mean.shape[-1]
+    # for diag cov mat, the det term is (stddev ** 2) ** D) ** -1/2
+    head_z_inv = ((2 * np.pi) ** (-D / 2)) * (head_dist.stddev ** -D)
+    head_gauss_densities = lambda x: head_z_inv * np.exp(
+        -0.5 * (head_dist.stddev ** -2) * np.einsum(
+            'td,td->t', 
+            x[None, ...] - head_dist.mean, 
+            x[None, ...] - head_dist.mean
+        )
+    )
+    # E_{p(eta)}[p(x|eta)] = int_R^D [p(x|eta)p(eta)]
+    # both terms are gaussian, bishop page 93 derives the marginal dist
+    tail_dist = GaussianDistribution(
+        mean=peta.mean, 
+        stddev=(args.cluster_observation_stddev ** 2 + peta.stddev ** 2) ** 0.5,
+    )
+    tail_z_inv = ((2 * np.pi) ** (-D / 2)) * (tail_dist.stddev ** -D)
+    tail_gauss_density = lambda x: tail_z_inv * np.exp(
+        -0.5 * (tail_dist.stddev ** -2) * np.einsum(
+            'd,d->', 
+            x - tail_dist.mean, 
+            x - tail_dist.mean
+        )
+    )
+    # weighted sum
+    ppd = lambda x: (
+        np.einsum('t,t->', head_mixture_weights, head_gauss_densities(x)) + 
+        tail_mixture_weight * tail_gauss_density(x)
+    )
+    return ppd
+
+def plot_ppd2d(ppd):
+    x = np.linspace(-2, 2, 333)
+    y = np.linspace(-2, 2, 333)
+
+    X, Y = np.meshgrid(x, y)
+    Z = np.zeros((333, 333))
+    for i in range(333):
+      for j in range(333):
+        Z[i, j] = ppd(np.concatenate([X[i, j, None], Y[i, j, None]], axis=-1))
+
+    plt.figure(figsize=(8, 6))
+    contour = plt.contourf(X, Y, Z, levels=50, cmap='viridis')
+
+    plt.colorbar(contour, label='Density')
+    plt.title('Posterior Predictive Density Plot')
+    plt.xlabel('X Axis')
+    plt.ylabel('Y Axis')
+    plt.show()
+
 def main():
-    xs0 = np.random.normal(loc=0.5, scale=0.05, size=[1000, 100])
-    xs1 = np.random.normal(loc=-0.5, scale=0.05, size=[1000, 100])
+    xs0 = np.random.normal(loc=0.5, scale=0.05, size=[1000, 2])
+    xs1 = np.random.normal(loc=-0.5, scale=0.05, size=[1000, 2])
     xs = np.concatenate([xs0, xs1], axis=0)
 
     pv = get_pv()
@@ -227,16 +286,17 @@ def main():
     qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
     print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
 
-    for _ in range(0, 5):
+    for _ in range(0, 10):
+        qv, qeta, qz = permute_cluster_ids(qv, qeta, qz)
         qv = update_qv(qz, pv)
         qeta = update_qeta(xs, qz)
         qz = update_qz(get_sni_info(xs, qv, qeta, pv, peta))
         print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
 
     print_stick_lengths(qv)
-    # qv, qeta, qz = permute_cluster_ids(qv, qeta, qz)
-    # print_stick_lengths(qv)
-    # print(f"ELBO normalized: {get_elbo_normalized(xs, qv, qeta, pv, peta)}")
+
+    ppd = get_posterior_predictive_density(qv, qeta, peta)
+    plot_ppd2d(ppd)
 
 if __name__ == "__main__":
     main()
