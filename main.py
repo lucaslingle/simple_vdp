@@ -3,14 +3,13 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 from scipy.special import gammaln, digamma
-from collections import namedtuple
 import logging
 import matplotlib.pyplot as plt
 
-logging.basicConfig(level=logging.INFO, force=True)
+logging.basicConfig(level=logging.ERROR, force=True)
 logger = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser("Simplified Kurihara VDP for DP-MoG")
+parser = argparse.ArgumentParser("Simplified Kurihara VDP for DPMoG")
 parser.add_argument("--data_csv", type=str)
 parser.add_argument("--cluster_observation_stddev", type=float, default=0.05)
 parser.add_argument("--cluster_location_prior_stddev", type=float, default=1.0)
@@ -228,9 +227,9 @@ def get_posterior_predictive_density(qv, qeta, peta):
     head_z_inv = ((2 * np.pi) ** (-D / 2)) * (head_dist.stddev ** -D)
     head_gauss_densities = lambda x: head_z_inv * np.exp(
         -0.5 * (head_dist.stddev ** -2) * np.einsum(
-            'td,td->t', 
-            x[None, ...] - head_dist.mean, 
-            x[None, ...] - head_dist.mean
+            'ntd,ntd->nt', 
+            np.expand_dims(x, 1) - np.expand_dims(head_dist.mean, 0), 
+            np.expand_dims(x, 1) - np.expand_dims(head_dist.mean, 0), 
         )
     )
     # E_{p(eta)}[p(x|eta)] = int_R^D [p(x|eta)p(eta)]
@@ -242,30 +241,31 @@ def get_posterior_predictive_density(qv, qeta, peta):
     tail_z_inv = ((2 * np.pi) ** (-D / 2)) * (tail_dist.stddev ** -D)
     tail_gauss_density = lambda x: tail_z_inv * np.exp(
         -0.5 * (tail_dist.stddev ** -2) * np.einsum(
-            'd,d->', 
+            'nd,nd->n', 
             x - tail_dist.mean, 
             x - tail_dist.mean
         )
     )
     # weighted sum
     ppd = lambda x: (
-        np.einsum('t,t->', head_mixture_weights, head_gauss_densities(x)) + 
+        np.einsum('t,nt->n', head_mixture_weights, head_gauss_densities(x)) + 
         tail_mixture_weight * tail_gauss_density(x)
     )
     return ppd
 
 def plot_ppd2d(ppd):
-    x = np.linspace(-2, 2, 333)
-    y = np.linspace(-2, 2, 333)
+    x = np.linspace(-1, 1, 333)
+    y = np.linspace(-1, 1, 333)
 
-    X, Y = np.meshgrid(x, y)
-    Z = np.zeros((333, 333))
-    for i in range(333):
-      for j in range(333):
-        Z[i, j] = ppd(np.concatenate([X[i, j, None], Y[i, j, None]], axis=-1))
+    x, y = np.meshgrid(x, y)
+    inp = np.concatenate([x[..., None], y[..., None]], axis=-1)
+    inp_shape_2d = inp.shape
+    inp = np.reshape(inp, [-1, inp_shape_2d[-1]])
+    outp = ppd(inp)
+    outp = np.reshape(outp, inp_shape_2d[0:-1])
 
     plt.figure(figsize=(8, 6))
-    contour = plt.contourf(X, Y, Z, levels=50, cmap='viridis')
+    contour = plt.contourf(x, y, outp, levels=50, cmap='viridis')
 
     plt.colorbar(contour, label='Density')
     plt.title('Posterior Predictive Density Plot')
