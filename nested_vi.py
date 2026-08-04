@@ -274,6 +274,7 @@ def plot_ppd2d(ppd):
     plt.show()
 
 def main():
+    np.random.seed(42)
     xs0 = np.random.normal(loc=0.5, scale=0.05, size=[1000, 2])
     xs1 = np.random.normal(loc=-0.5, scale=0.05, size=[1000, 2])
     xs = np.concatenate([xs0, xs1], axis=0)
