@@ -17,6 +17,18 @@ SIGMA_X = 0.05
 NUM_DATA = 2000
 DIM_DATA = 2
 
+def get_pc():
+    return GaussianDist(mean=0.0, stddev=SIGMA_C)
+
+def get_qc_initial(data_dim):
+    mu = np.random.normal(
+        loc=0.0, 
+        scale=SIGMA_C, 
+        size=[TRUNCATION_LEVEL, data_dim],
+    )
+    sigma = np.repeat(np.array([SIGMA_C]), repeats=TRUNCATION_LEVEL, axis=0)
+    return GaussianDist(mean=mu, stddev=sigma)
+
 def get_pv():
     return BetaDist(alpha=1.0, beta=1.0)
 
@@ -29,18 +41,6 @@ def get_qv_initial():
     alpha = mean * conc
     beta = conc - alpha
     return BetaDist(alpha=alpha, beta=beta)
-
-def get_pc():
-    return GaussianDist(mean=0.0, stddev=SIGMA_C)
-
-def get_qc_initial(data_dim):
-    mu = np.random.normal(
-        loc=0.0, 
-        scale=SIGMA_C, 
-        size=[TRUNCATION_LEVEL, data_dim],
-    )
-    sigma = np.repeat(np.array([SIGMA_C]), repeats=TRUNCATION_LEVEL, axis=0)
-    return GaussianDist(mean=mu, stddev=sigma)
 
 def update_qz(
     *,
