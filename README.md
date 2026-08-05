@@ -2,7 +2,7 @@
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WgeSy5gPPUzS5lYcXL2v-_jEHni-4f7c?usp=sharing)
 
-My implementation of the Dirichlet Process algorithm from [Kurihara et al., 2007](https://proceedings.neurips.cc/paper_files/paper/2006/file/2bd235c31c97855b7ef2dc8b414779af-Paper.pdf) is available in nested_vi.py. I also support a simpler algorithm in simple_vi.py discussed in my [blog post](https://lucaslingle.substack.com/p/simplified-variational-inference) that performs slightly better in terms of ELBO. 
+My implementation of the Dirichlet Process algorithm from [Kurihara et al., 2007](https://proceedings.neurips.cc/paper_files/paper/2006/file/2bd235c31c97855b7ef2dc8b414779af-Paper.pdf) is available in nested_vi.py. I also support a simpler algorithm in simple_vi.py from my [blog](https://lucaslingle.substack.com/p/simplified-variational-inference) that performs slightly better in terms of ELBO. 
 
 ### Description
 
