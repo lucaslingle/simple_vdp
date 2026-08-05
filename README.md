@@ -1,9 +1,10 @@
 # simple_vdp
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1IG95l-7s3FWJ4J9uKOpoptGVryACDO4V?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1WgeSy5gPPUzS5lYcXL2v-_jEHni-4f7c?usp=sharing)
 
-Implementation of the Dirichlet Process algorithm from Kurihara et al., 2007.   
-I do not implement kd-trees, just the variational inference algorithm.
+My implementation of the Dirichlet Process algorithm from Kurihara et al., 2007
+is available in nested_vi.py. I also support a simpler algorithm in simple_vi.py
+which performs slightly better in terms of ELBO
 
 ### Description
 
