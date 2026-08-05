@@ -14,6 +14,20 @@ CategoricalDist = namedtuple("CategoricalDist", ["headprobs", "headsum", "stabil
 TRUNCATION_LEVEL = 10
 SIGMA_C = 1.0
 SIGMA_X = 0.05
+NUM_DATA = 2000
+DIM_DATA = 2
+
+def get_pc():
+    return GaussianDist(mean=0.0, stddev=SIGMA_C)
+
+def get_qc_initial(data_dim):
+    mu = np.random.normal(
+        loc=0.0, 
+        scale=SIGMA_C, 
+        size=[TRUNCATION_LEVEL, data_dim],
+    )
+    sigma = np.repeat(np.array([SIGMA_C]), repeats=TRUNCATION_LEVEL, axis=0)
+    return GaussianDist(mean=mu, stddev=sigma)
 
 def get_pv():
     return BetaDist(alpha=1.0, beta=1.0)
@@ -27,18 +41,6 @@ def get_qv_initial():
     alpha = mean * conc
     beta = conc - alpha
     return BetaDist(alpha=alpha, beta=beta)
-
-def get_pc():
-    return GaussianDist(mean=0.0, stddev=SIGMA_C)
-
-def get_qc_initial(data_dim):
-    mu = np.random.normal(
-        loc=0.0, 
-        scale=SIGMA_C, 
-        size=[TRUNCATION_LEVEL, data_dim],
-    )
-    sigma = np.repeat(np.array([SIGMA_C]), repeats=TRUNCATION_LEVEL, axis=0)
-    return GaussianDist(mean=mu, stddev=sigma)
 
 def update_qz(
     *,
@@ -170,7 +172,7 @@ def permute_cluster_ids(*, qc, qv, qz):
     qz_new = CategoricalDist(
         headprobs=np.take_along_axis(qz.headprobs, sort_idxs[None, ...], axis=1), 
         headsum=np.take_along_axis(qz.headsum, sort_idxs, axis=0),
-        stabilizer=np.take_along_axis(qz.stabilizer, sort_idxs, axis=0),
+        stabilizer=qz.stabilizer,
     )
     return qc_new, qv_new, qz_new
 
@@ -181,8 +183,8 @@ def print_stick_lengths(*, qv):
 
 def main():
     np.random.seed(42)
-    xs0 = np.random.normal(loc=0.5, scale=0.05, size=[1000, 2])
-    xs1 = np.random.normal(loc=-0.5, scale=0.05, size=[1000, 2])
+    xs0 = np.random.normal(loc=0.5, scale=0.05, size=[NUM_DATA // 2, DIM_DATA])
+    xs1 = np.random.normal(loc=-0.5, scale=0.05, size=[NUM_DATA // 2, DIM_DATA])
     xs = np.concatenate([xs0, xs1], axis=0)
 
     pv = get_pv()
