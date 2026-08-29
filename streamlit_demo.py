@@ -2,8 +2,6 @@ from collections import namedtuple
 import numpy as np
 from scipy.special import gammaln, digamma
 import logging
-import matplotlib.pyplot as plt
-import copy
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -220,7 +218,7 @@ class SimpleVI:
         pc = self.get_pc()
         qv = self.get_qv_initial()
         qc = self.get_qc_initial()
-        qc_snapshots = [copy.deepcopy(qc)]
+        qc_snapshots = [qc]
         sticklen_snapshots = [self.get_mean_stick_lengths(qv=qv)]
 
         qz = self.update_qz(xs=self._xs, qc=qc, qv=qv)
@@ -234,7 +232,7 @@ class SimpleVI:
             qz = self.update_qz(xs=self._xs, qc=qc, qv=qv)
             elbo = self.get_elbo_normalized(xs=self._xs, qc=qc, qv=qv, pc=pc, pv=pv)
             print(f"ELBO normalized: {elbo}")
-            qc_snapshots.append(copy.deepcopy(qc))
+            qc_snapshots.append(qc)
             sticklen_snapshots.append(self.get_mean_stick_lengths(qv=qv))
 
         return dict(
