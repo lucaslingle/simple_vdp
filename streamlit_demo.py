@@ -18,6 +18,8 @@ SIGMA_C = 1.0
 SIGMA_X = 0.05
 NUM_DATA = 2000
 DIM_DATA = 2
+KAPPA = 0.01
+OPT_ITERS = 100
 
 
 class SimpleVI:
@@ -28,12 +30,14 @@ class SimpleVI:
         sigma_x: float,
         xs: np.ndarray,
         kappa: float,
+        opt_iters: int,
     ):
         self._truncation_level = truncation_level
         self._sigma_c = sigma_c
         self._sigma_x = sigma_x
         self._xs = xs
         self._kappa = kappa
+        self._opt_iters = opt_iters
         self._logger = logging.getLogger(__name__)
 
     def get_pc(self):
@@ -70,8 +74,10 @@ class SimpleVI:
     ):
         line_11 = digamma(qv.alpha) - digamma(qv.alpha + qv.beta)  # [T]
         line_12 = digamma(qv.beta) - digamma(qv.alpha + qv.beta)  # [T]
-        line_13 = np.einsum('ld,nd->nl', qc.mean / (SIGMA_X ** 2), xs) + \
-            -0.5 * np.einsum('ld,ld->l', qc.mean / (SIGMA_X ** 2), qc.mean)[None, ...] # [N, T]
+        D = xs.shape[-1]
+        trace_term = (D * qc.stddev ** 2) / (self._sigma_x ** 2)
+        line_13 = np.einsum('ld,nd->nl', qc.mean / (self._sigma_x ** 2), xs) + \
+            -0.5 * (np.einsum('ld,ld->l', qc.mean / (self._sigma_x ** 2), qc.mean) + trace_term)[None, ...] # [N, T]
         S_n_i = (
             line_11[None,...] + 
             np.cumsum(np.concatenate([np.array([0]), line_12[:-1]], axis=0), axis=0)[None, ...] + 
@@ -225,7 +231,7 @@ class SimpleVI:
         elbo = self.get_elbo_normalized(xs=self._xs, qc=qc, qv=qv, pc=pc, pv=pv)
         print(f"ELBO normalized: {elbo}")
 
-        for _ in range(0, 10):
+        for _ in range(0, self._opt_iters):
             # qc, qv, qz = self.permute_cluster_ids(qc=qc, qv=qv, qz=qz)
             qc = self.update_qc(qc=qc, xs=self._xs, qz=qz, kappa=self._kappa)
             qv = self.update_qv(qv=qv, qz=qz, pv=pv, kappa=self._kappa)
@@ -247,10 +253,11 @@ class SimpleVI:
         dfs = []
         for i in range(self._truncation_level):
             df = pd.DataFrame({
-                "timestep": range(11), 
+                "timestep": range(self._opt_iters + 1), 
                 "x": [qc.mean[i][0] for qc in qc_snapshots], 
                 "y": [qc.mean[i][1] for qc in qc_snapshots],
-                "size": [1000 * sl[i] for sl in sticklen_snapshots],
+                "weight": [sl[i] for sl in sticklen_snapshots],
+                "size": [10000 * qc.stddev[i] for qc in qc_snapshots]
             })
             dfs.append(df)
         df = pd.concat(dfs, ignore_index=True)
@@ -259,7 +266,7 @@ class SimpleVI:
         st.title("Simple VDP: Cluster Fitting in 2D")
         st.write("Use the slider to change the time step.")
         current_step = st.slider(
-            "Select Time Step", min_value=0, max_value=10, value=0, step=1
+            "Select Time Step", min_value=0, max_value=self._opt_iters, value=0, step=1
         )
 
         filtered_df = df[df["timestep"] == current_step]
@@ -272,8 +279,9 @@ class SimpleVI:
                 name="Clusters",
                 marker=dict(
                     size=filtered_df["size"], 
-                    sizemode="area",                 
-                    sizemin=4                        
+                    sizemode="diameter",                 
+                    sizemin=4,
+                    opacity=filtered_df["weight"],
                 )
             )
         )
@@ -284,6 +292,7 @@ class SimpleVI:
                 mode="markers",
                 name="Datapoints",
                 opacity=0.2,
+                marker=dict(color="green"),
             )
         )
         st.plotly_chart(fig, use_container_width=True)
@@ -299,7 +308,8 @@ if __name__ == "__main__":
         sigma_c=SIGMA_C,
         sigma_x=SIGMA_X,
         xs=xs,
-        kappa=1.0,
+        kappa=KAPPA,
+        opt_iters=OPT_ITERS,
     )
     returns = simple_vi.run()
     simple_vi.print_stick_lengths(qv=returns["qv"])
